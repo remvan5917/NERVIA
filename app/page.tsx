@@ -8,6 +8,35 @@ interface FileInfo {
   path: string;
 }
 
+// Type declarations for File System API
+interface FileSystemEntry {
+  isFile: boolean;
+  isDirectory: boolean;
+  name: string;
+  fullPath: string;
+}
+
+interface FileSystemFileEntry extends FileSystemEntry {
+  file(callback: (file: File) => void): void;
+}
+
+interface FileSystemDirectoryEntry extends FileSystemEntry {
+  createReader(): FileSystemDirectoryReader;
+}
+
+interface FileSystemDirectoryReader {
+  readEntries(callback: (entries: FileSystemEntry[]) => void): void;
+}
+
+interface ExtendedHTMLInputElement extends Omit<HTMLInputElement, 'webkitdirectory'> {
+  webkitdirectory?: boolean;
+  directory?: boolean;
+}
+
+interface ExtendedFile extends Omit<File, 'webkitRelativePath'> {
+  webkitRelativePath?: string;
+}
+
 export default function Home() {
   const [files, setFiles] = useState<FileInfo[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -22,20 +51,30 @@ export default function Home() {
     setProgress(0);
 
     const fileInfoArray: FileInfo[] = [];
+    const batchSize = 100; // Process in batches to avoid blocking UI
     
-    // Process all files
-    for (let i = 0; i < fileList.length; i++) {
-      const file = fileList[i];
-      const relativePath = (file as any).webkitRelativePath || file.name;
-      
-      fileInfoArray.push({
-        name: file.name,
-        size: file.size,
-        path: relativePath,
-      });
+    // Process files in batches
+    for (let i = 0; i < fileList.length; i += batchSize) {
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => {
+          const end = Math.min(i + batchSize, fileList.length);
+          
+          for (let j = i; j < end; j++) {
+            const file = fileList[j] as ExtendedFile;
+            const relativePath = file.webkitRelativePath || file.name;
+            
+            fileInfoArray.push({
+              name: file.name,
+              size: file.size,
+              path: relativePath,
+            });
+          }
 
-      // Update progress
-      setProgress(Math.round(((i + 1) / fileList.length) * 100));
+          // Update progress
+          setProgress(Math.round((end / fileList.length) * 100));
+          resolve();
+        });
+      });
     }
 
     setFiles(fileInfoArray);
@@ -64,16 +103,16 @@ export default function Home() {
     const items = e.dataTransfer.items;
     const files: File[] = [];
 
-    const processEntry = async (entry: any): Promise<void> => {
+    const processEntry = async (entry: FileSystemEntry): Promise<void> => {
       return new Promise((resolve) => {
         if (entry.isFile) {
-          entry.file((file: File) => {
+          (entry as FileSystemFileEntry).file((file: File) => {
             files.push(file);
             resolve();
           });
         } else if (entry.isDirectory) {
-          const reader = entry.createReader();
-          reader.readEntries(async (entries: any[]) => {
+          const reader = (entry as FileSystemDirectoryEntry).createReader();
+          reader.readEntries(async (entries: FileSystemEntry[]) => {
             for (const entry of entries) {
               await processEntry(entry);
             }
@@ -149,14 +188,12 @@ export default function Home() {
             onDrop={handleDrop}
           >
             <input
-              ref={fileInputRef}
+              ref={fileInputRef as React.RefObject<ExtendedHTMLInputElement>}
               type="file"
               onChange={handleChange}
               className="hidden"
               multiple
-              // @ts-ignore - webkitdirectory is not in TypeScript types
-              webkitdirectory=""
-              directory=""
+              {...({ webkitdirectory: '', directory: '' } as any)}
             />
             
             <svg
